@@ -9,18 +9,24 @@ This repository provides a framework for evaluating methods to detect distributi
 - [Label Shift \& Covariate Shift Detection Experiments](#label-shift--covariate-shift-detection-experiments)
   - [Table of Contents](#table-of-contents)
   - [Overview](#overview)
-  - [Methods](#methods)
   - [Repository Structure](#repository-structure)
   - [Setup \& Installation](#setup--installation)
   - [Running Experiments](#running-experiments)
   - [Experiment Arguments](#experiment-arguments)
+  - [Examples](#examples)
   - [Results \& Logging](#results--logging)
-  - [Extending the Framework](#extending-the-framework)
-  - [Troubleshooting](#troubleshooting)
-  - [Citations](#citations)
-  - [Contact](#contact)
+  - [reproduction.py](#reproductionpy)
+  - [DSD\_Analysis.ipynb](#dsd_analysisipynb)
   - [Weighted CDF Implementations](#weighted-cdf-implementations)
+    - [utils/weighted\_cdf.py](#utilsweighted_cdfpy)
+    - [utils/weighted\_cdf\_bbse.py](#utilsweighted_cdf_bbsepy)
+    - [utils/weighted\_cdf\_bbse\_ods.py](#utilsweighted_cdf_bbse_odspy)
   - [PBRS Buffer Class and Additional Protector Functions](#pbrs-buffer-class-and-additional-protector-functions)
+    - [PBRSBuffer Class](#pbrsbuffer-class)
+    - [Additional Protector Functions](#additional-protector-functions)
+      - [get\_weighted\_protector\_from\_ents(source\_ents, source\_pseudo\_labels, p\_s, p\_t, args)](#get_weighted_protector_from_entssource_ents-source_pseudo_labels-p_s-p_t-args)
+      - [get\_bbse\_weighted\_protector\_from\_ents(source\_ents, pseudo\_labels, weights, args)](#get_bbse_weighted_protector_from_entssource_ents-pseudo_labels-weights-args)
+      - [get\_bbse\_ods\_weighted\_protector\_from\_ents(source\_ents, p\_test, p\_source, source\_labels, confusion\_matrix, ods\_alpha, args)](#get_bbse_ods_weighted_protector_from_entssource_ents-p_test-p_source-source_labels-confusion_matrix-ods_alpha-args)
 
 ---
 
@@ -32,19 +38,6 @@ The goal of this repository is to compare different statistical and learning-bas
 
 Detection is performed using entropy-based martingale tests and various weighting/protection schemes.
 
----
-
-## Methods
-
-The following methods are implemented and can be selected via the `--method` argument:
-
-- **baseline:** No adaptation; runs the martingale test on the raw entropy stream.
-- **pbrs:** PBRS filtering (buffer and confidence threshold).
-- **w-cdf:** Weighted CDF using importance weighting based on estimated label distributions.
-- **w-bbse:** Black Box Shift Estimation (BBSE) for more accurate weighting.
-- **w-bbseods:** BBSE with Online Distribution Shift (ODS) corrections.
-
-Each method is evaluated for both False Positive Rate (FPR, under label shift) and True Positive Rate (TPR, under covariate shift).
 
 ---
 
@@ -55,39 +48,47 @@ Each method is evaluated for both False Positive Rate (FPR, under label shift) a
 ├── Run_LabelShift_Experiments.py      # Main experiment runner
 ├── PBRS_LabelShift_Evaluation.py      # PBRS evaluation logic
 ├── WeightedCDF_LabelShift_Evaluation.py # Weighted CDF, BBSE, ODS logic
-├── utilities.py                       # Data loading, model helpers, martingale, etc.
-├── experiment_logger.py               # Logging and result saving
-├── plotting.py                        # Plotting utilities
-├── protector.py                       # Protector/CDF classes
-├── utils_entropy_cache.py             # Entropy caching helpers
-├── data/                              # CIFAR-10 and CIFAR-10-C data
 ├── reproduction.py                    # Script to reproduce main martingale-based shift detection results
-├── DSD_Analysis.ipynb                 # Self-contained Jupyter notebook for in-depth analysis and visualization of shift detection
-└── logs/                              # Experiment logs and results
+├── DSD_Analysis.ipynb                 # Self-contained Jupyter notebook for in-depth analysis
+├── data/                             # CIFAR-10 and CIFAR-10-C data
+├── logs/                             # Experiment logs and results
+└── utils/                            # Utility modules and implementations
+    ├── __init__.py                   # Package initialization
+    ├── cdf.py                        # Basic CDF implementation
+    ├── cli_utils.py                  # Command-line interface utilities
+    ├── experiment_logger.py          # Logging and result saving (*)
+    ├── plotting.py                   # Plotting utilities (*)
+    ├── poem.py                       # POEM implementation 
+    ├── protector.py                  # Protector/CDF classes (*)
+    ├── sam.py                        # SAM implementation
+    ├── sar.py                        # SAR implementation
+    ├── temperature_scaling.py        # Temperature scaling utilities
+    ├── tent.py                       # TENT implementation
+    ├── third_party.py                # Third-party utility functions
+    ├── utilities.py                  # General utility functions (*)
+    ├── utils.py                      # Additional utility functions
+    ├── utils_entropy_cache.py        # Entropy caching helpers (*)
+    ├── weighted_cdf.py               # Basic weighted CDF implementation (*)
+    ├── weighted_cdf_bbse.py          # BBSE weighted CDF implementation (*)
+    └── weighted_cdf_bbse_ods.py      # BBSE with ODS weighted CDF implementation (*)
 ```
+
+Note for utils/: (*) Indicates the file was created by us or is a file from the original POEM repository but was modified by us. All other files are exactly as they are in the original repository: https://github.com/yarinbar/poem
 
 ---
 
 ## Setup & Installation
 
-1. **Clone the repository:**
+1. **Clone the repository and Install Dependencies:**
    ```bash
-   git clone <your-repo-url>
-   cd <your-repo-directory>
+   git clone https://github.com/Louexes/MartingaleShiftDetectorStudy.git
+   cd MartingaleShiftDetectorStudy-main
+   conda create --name poem python=3.10
+   conda activate poem
+   pip install -r requirements.txt
    ```
 
-2. **Install dependencies:**
-   - Python 3.8+
-   - PyTorch (with CUDA or MPS support if available)
-   - torchvision
-   - numpy, pandas, tqdm, matplotlib
-
-   You can install the main dependencies with:
-   ```bash
-   pip install torch torchvision numpy pandas tqdm matplotlib
-   ```
-
-3. **Download CIFAR-10 and CIFAR-10-C:**
+2. **Download CIFAR-10 and CIFAR-10-C:**
    - The code will automatically download CIFAR-10 if not present.
    - For CIFAR-10-C, download from [CIFAR-10-C GitHub](https://github.com/hendrycks/robustness) and place the files in `./data/CIFAR-10-C/`.
 
@@ -95,27 +96,17 @@ Each method is evaluated for both False Positive Rate (FPR, under label shift) a
 
 ## Running Experiments
 
-The main entry point is `Run_LabelShift_Experiments.py`. You can run experiments with different methods and settings using command-line arguments.
+The main entry point is `Run_LabelShift_Experiments.py`, to evaluate the extension of the distribution shift detector. You can run experiments with different methods and settings using command-line arguments.
 
-**Example: Run the baseline method**
-```bash
-python Run_LabelShift_Experiments.py --method baseline
-```
+The following methods are implemented and can be selected via the `--method` argument:
 
-**Example: Run PBRS with 5 seeds**
-```bash
-python Run_LabelShift_Experiments.py --method pbrs --seeds 0 1 2 3 4
-```
+- **baseline:** No adaptation; runs the martingale test on the raw entropy stream.
+- **pbrs:** PBRS filtering (buffer and confidence threshold).
+- **w-cdf:** Weighted CDF using importance weighting based on estimated label distributions.
+- **w-bbse:** Black Box Shift Estimation (BBSE) for more accurate weighting.
+- **w-bbseods:** BBSE with Online Distribution Shift (ODS) corrections.
 
-**Example: Run weighted CDF**
-```bash
-python Run_LabelShift_Experiments.py --method w-cdf
-```
-
-**All arguments can be listed with:**
-```bash
-python Run_LabelShift_Experiments.py --help
-```
+Each method is evaluated for both False Positive Rate (FPR, under label shift) and True Positive Rate (TPR, under covariate shift).
 
 ---
 
@@ -152,57 +143,35 @@ Key arguments (with defaults):
 
 ---
 
+## Examples
+
+**Example: Run the baseline method**
+```bash
+python Run_LabelShift_Experiments.py --method baseline
+```
+
+**Example: Run PBRS with 5 seeds**
+```bash
+python Run_LabelShift_Experiments.py --method pbrs --seeds 0 1 2 3 4
+```
+
+**Example: Run weighted CDF**
+```bash
+python Run_LabelShift_Experiments.py --method w-cdf
+```
+
+**All arguments can be listed with:**
+```bash
+python Run_LabelShift_Experiments.py --help
+```
+
+
 ## Results & Logging
 
 - **Logs and results** are saved in a timestamped directory under `./logs/`.
 - **FPR and TPR results** are saved as CSV and JSON files.
 - **Plots** (e.g., TPR comparison) are saved as PNG files.
 - **Console output** provides progress, debug info, and summary statistics.
-
----
-
-## Extending the Framework
-
-- **Add new methods:**  
-  Implement your method as a function and add it to the `METHODS` dictionary in `Run_LabelShift_Experiments.py`.
-
-- **Add new datasets:**  
-  Add new data loaders to `utilities.py` and update experiment logic as needed.
-
-- **Change evaluation logic:**  
-  Modify or extend the evaluation functions in the relevant files.
-
----
-
-## Troubleshooting
-
-- **Not enough samples for a class subset:**  
-  The code oversamples with replacement to ensure enough data for each experiment.
-
-- **Device errors (e.g., MPS):**  
-  Some PyTorch operations may not be supported on MPS. The code includes workarounds for most cases.
-
-- **Missing dependencies:**  
-  Install all required Python packages as listed above.
-
-- **Slow runs:**  
-  Use a GPU (`cuda` or `mps`) for best performance.
-
----
-
-## Citations
-
-If you use this codebase in your research, please cite the relevant papers for PBRS, BBSE, and ODS methods as well as the CIFAR-10 and CIFAR-10-C datasets.
-
----
-
-## Contact
-
-For questions or contributions, please open an issue or pull request on the repository.
-
----
-
-**Happy experimenting!**
 
 ---
 
@@ -238,7 +207,6 @@ This Jupyter notebook provides a self-contained, in-depth analysis and visualiza
 - Load and process data within the notebook (e.g., delay data, corruption types, method results).
 - Analyze detection statistics, accuracy, and performance metrics.
 - Visualize results across corruption types, severities, and adaptation methods.
-- Generate publication-quality figures and tables.
 
 **To use:**
 1. Open `DSD_Analysis.ipynb` in Jupyter.
@@ -289,7 +257,7 @@ The `protector.py` file has been extended with a new `PBRSBuffer` class and addi
 
 ### PBRSBuffer Class
 
-The `PBRSBuffer` class manages a fixed-capacity buffer of entropy samples, ensuring balanced class representation. It is used in the PBRS (Pseudo-Balanced Reservoir Sampling) method to filter and store entropy values based on pseudo-labels.
+The `PBRSBuffer` class is added to `protector.py` and manages a fixed-capacity buffer of entropy samples, ensuring balanced class representation. It is used in the PBRS (Pseudo-Balanced Reservoir Sampling) method to filter and store entropy values based on pseudo-labels.
 
 - **Purpose:** Maintains a balanced buffer of entropy samples across classes, ensuring that each class is represented equally up to a target quota.
 - **Key Methods:**
