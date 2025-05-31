@@ -4,36 +4,62 @@ from itertools import combinations
 from torch.utils.data import DataLoader, Subset
 
 
-from weighted_cdf          import WeightedCDF
-from weighted_cdf_bbse     import BBSEWeightedCDF
-from weighted_cdf_bbse_ods import (
+from utils.weighted_cdf          import WeightedCDF
+from utils.weighted_cdf_bbse     import BBSEWeightedCDF
+from utils.weighted_cdf_bbse_ods import (
         BBSEODSWeightedCDF,
         estimate_confusion_matrix,
         estimate_target_distribution_from_preds,
 )
 
-# -----------------------------------------------------------------------
-#  lightweight martingale step (we use this to incrementally increase Martingale as opposed to running it all in one go)
-# -----------------------------------------------------------------------
+from utils.protector import Protector
+
+
 def mart_step(ent, protector):
+    """
+    Compute one step of the martingale process for a single entropy value.
+    
+    Args:
+        ent: Entropy value to evaluate
+        protector: Protector object that maintains the martingale process
+        
+    Returns:
+        Log of the current martingale value (with small epsilon for numerical stability)
+    """
     u = protector.cdf(ent)
-    protector.protect_u(u)
+    protector.protect_u(u) 
     return np.log(protector.martingales[-1] + 1e-8)
 
 def _no_update(self, *a, **kw):         
+    """
+    Dummy update method used for static CDF variants that don't need updating.
+    """
     pass
 
 
-# -----------------------------------------------------------------------
-#  FACTORY returning a ready-to-use Protector for any variant
-# -----------------------------------------------------------------------
 def build_protector(
         variant:str,
         model, dl_clean, dl_shift,
         device,
         gamma=1/(8*np.sqrt(3)), eps_clip=1.8):
+    """
+    Build a protector object based on the specified CDF variant.
+    
+    Args:
+        variant: Type of CDF to use ('plain', 'bbse', or 'bbseods')
+        model: Neural network model
+        dl_clean: DataLoader for clean source data
+        dl_shift: DataLoader for shifted target data  
+        device: Device to run computations on
+        gamma: Gamma parameter for protector
+        eps_clip: Epsilon clipping value for protector
+        
+    Returns:
+        Configured Protector object with the specified CDF variant
+    """
 
     if variant == "plain":        # ---------------- WeightedCDF
+        # Collect entropies and predictions on clean data
         ents, yhat = [], []
         with torch.no_grad():
             for xb,_ in dl_clean:
@@ -41,6 +67,7 @@ def build_protector(
                 ents.extend((-torch.sum(pr*torch.log(pr+1e-8),1)).cpu().tolist())
                 yhat.extend(torch.argmax(pr,1).cpu().tolist())
 
+        # Compute source and target distributions
         p_s = torch.bincount(torch.tensor(yhat), minlength=10).float()
         p_s /= p_s.sum()
         p_t = estimate_target_distribution_from_preds(model, dl_shift, device)
@@ -50,6 +77,7 @@ def build_protector(
         cdf.batch_ods_update = _no_update.__get__(cdf)
 
     elif variant == "bbse":       # ---------------- static BBSE
+        # Collect entropies and true labels on clean data
         ents, y_true = [], []
         with torch.no_grad():
             for xb,yb in dl_clean:
@@ -57,12 +85,11 @@ def build_protector(
                 ents.extend((-torch.sum(pr*torch.log(pr+1e-8),1)).cpu().tolist())
                 y_true.extend(yb.cpu().tolist())
 
+        # Estimate confusion matrix and distributions
         C, p_s     = estimate_confusion_matrix(model, dl_clean, device)
         p_t_pred   = estimate_target_distribution_from_preds(model, dl_shift, device)
-        # BBSE correction: solve for p_t_true
         ridge = 1e-6 * torch.eye(len(p_s), device=p_s.device)
         C_T = C.t() + ridge
-        # --- Fix for MPS ---
         C_T_cpu = C_T.cpu()
         p_t_pred_cpu = p_t_pred.cpu()
         p_t_true_cpu = torch.linalg.solve(C_T_cpu, p_t_pred_cpu)
@@ -74,6 +101,7 @@ def build_protector(
         cdf.batch_ods_update = _no_update.__get__(cdf)
 
     elif variant == "bbseods":    # ---------------- online BBSE+ODS
+        # Collect entropies and true labels on clean data
         ents, y_true = [], []
         with torch.no_grad():
             for xb,yb in dl_clean:
@@ -96,13 +124,11 @@ def build_protector(
     else:
         raise ValueError(f"unknown variant {variant}")
 
-    # ---------------- wrap into POEM Protector --------------------------
-    from protector import Protector
+    # Configure and return protector with the chosen CDF
     prot = Protector(cdf=cdf, device=device)
     prot.set_gamma(gamma)
     prot.set_eps_clip_val(eps_clip)
     return prot
-# =======================================================================
 
 
 
