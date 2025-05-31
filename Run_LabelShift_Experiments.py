@@ -2,16 +2,15 @@ import os, argparse, numpy as np, torch, torchvision
 import torchvision.transforms as T
 from torch.utils.data import DataLoader
 from utils.utilities          import *
-from experiment_logger  import (
+from utils.experiment_logger  import (
         setup_logging, log_experiment_start, log_progress,
         save_results, log_results)
-from plotting           import plot_tpr_comparison
-from protector          import get_protector_from_ents
-from utils_entropy_cache import get_source_entropies
+from utils.plotting           import plot_tpr_comparison
+from utils.protector          import get_protector_from_ents
+from utils.utils_entropy_cache import get_source_entropies
 
 # ---------- PBRS imports -------------------------------------
 from PBRS_LabelShift_Evaluation import *
-#from PBRS_LabelShift_Evaluation_Minimal import *
 
 # ---------- WeightedCDF imports -------------------------------------
 from WeightedCDF_LabelShift_Evaluation import (
@@ -27,8 +26,8 @@ from WeightedCDF_LabelShift_Evaluation import (
 def get_methods():
     return {
         "baseline": dict(
-            fpr = evaluate_PBRS_FPR,
-            tpr = evaluate_PBRS_TPR,
+            fpr = evaluate_PBRS_FPR, #note we use same function as for PBRS but argument use_pbrs is False
+            tpr = evaluate_PBRS_TPR, #note we use same function as for PBRS but argument use_pbrs is False
             needs_initial_protector = True),
         "pbrs": dict(
             fpr = evaluate_PBRS_FPR,
