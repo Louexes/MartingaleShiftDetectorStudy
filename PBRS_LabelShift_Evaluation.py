@@ -1,11 +1,10 @@
-# ----------------------------------------------------------------------
 import numpy as np
 import torch
 import pandas as pd
 from itertools import combinations
 from collections import defaultdict
 from utils.utilities import *
-from protector import PBRSBuffer
+from utils.protector import PBRSBuffer
 
 def evaluate_PBRS_FPR(model, load_cifar10_label_shift, BasicDataset,
                              run_martingale, protector, transform, args, device,
@@ -20,7 +19,7 @@ def evaluate_PBRS_FPR(model, load_cifar10_label_shift, BasicDataset,
     print(f"Use PBRS: {use_pbrs}")
 
     for seed in seeds:
-        print(f"\n🔁 Running with seed: {seed}")
+        print(f"\nRunning with seed: {seed}")
         np.random.seed(seed)
         torch.manual_seed(seed)
         torch.backends.cudnn.deterministic = True
@@ -91,13 +90,13 @@ def evaluate_PBRS_FPR(model, load_cifar10_label_shift, BasicDataset,
             fpr = sum(threshold_crossed.values()) / len(threshold_crossed)
             fprs[num_classes].append(fpr)
 
-    print(f"\n📊 FPR summary across seeds for method: {label}")
+    print(f"\nFPR summary across seeds for method: {label}")
     for num_classes in num_classes_list:
         mean_fpr = np.mean(fprs[num_classes])
         std_fpr = np.std(fprs[num_classes])
         print(f"{num_classes} classes: {label} → FPR = {mean_fpr:.3f} ± {std_fpr:.3f}")
 
-    print(f"\n📊 Logging FPR results to {log_path} for method: {label}")
+    print(f"\nLogging FPR results to {log_path} for method: {label}")
     log_fpr_results(fprs, label=label, out_path=log_path)
     return {k: float(np.mean(v)) for k, v in fprs.items()}
 
@@ -127,13 +126,13 @@ def evaluate_PBRS_TPR(
         device,
         corruption_types,
         severities,
-        n_examples      = 2000,   #  <-- knob ❶  (clean part = n_examples, corrupt part = n_examples)
-        seeds           = range(3),#  <-- knob ❷
-        buffer_capacity = 512,     #  <-- PBRS knob
-        confidence_threshold  = 0.5,     #  <-- PBRS knob
+        n_examples      = 2000, 
+        seeds           = range(3),
+        buffer_capacity = 512,     
+        confidence_threshold  = 0.5,     
         num_classes     = 10,
         use_pbrs        = True,
-        log_path        = None):   #  set to None to skip CSV logging
+        log_path        = None):   
     """
     Fast TPR evaluation under covariate-shift streams.
     Returns: dict[(corruption, severity)] -> {detection_rate, avg_delay, …}
@@ -147,12 +146,12 @@ def evaluate_PBRS_TPR(
             detections, delays = [], []
 
             for sd in seeds:
-                # reproducibility -------------------------------------------------
+
                 np.random.seed(sd);  torch.manual_seed(sd)
                 torch.backends.cudnn.deterministic = True
                 torch.backends.cudnn.benchmark     = False
 
-                # stream loader ---------------------------------------------------
+
                 loader, _, _ = load_clean_then_corrupt_sequence(
                     corruption = corr,
                     severity   = sev,
@@ -162,7 +161,6 @@ def evaluate_PBRS_TPR(
                     batch_size = args.batch_size,
                 )
 
-                # ------------------------------------------------ PBRS branch ---
                 if use_pbrs:
                     buf   = PBRSBuffer(capacity=buffer_capacity, num_classes=num_classes)
                     ents  = [np.nan] * (2 * n_examples)           # placeholder
@@ -178,7 +176,7 @@ def evaluate_PBRS_TPR(
 
                             for e, y, c in zip(ent.cpu(), yhat.cpu(), conf.cpu()):
                                 if step == shift_pt:
-                                    buf.reset()                   # discard clean part
+                                    buf.reset()                   
                                 if c > confidence_threshold and buf.accept(int(y)):
                                     buf.add(step, float(e), int(y))
                                 step += 1
@@ -187,7 +185,7 @@ def evaluate_PBRS_TPR(
                         ents[idx] = e
 
                     ents = np.asarray(ents, dtype=np.float32)
-                # ------------------------------------------------ baseline -----
+
                 else:
                     ent_list = []
                     with torch.no_grad():
@@ -200,14 +198,14 @@ def evaluate_PBRS_TPR(
                     ents = np.array(ent_list)
                     #print(f"ents: {ents}")
 
-                # ---------------- run martingale on valid entropy values -------------
-                mask = ~np.isnan(ents)          # boolean mask of finite entries
-                if not mask.any():              # nothing to test
+
+                mask = ~np.isnan(ents)         
+                if not mask.any():              
                     triggered, delay = False, None
                     print("No valid entropies")
                 else:
-                    ents_valid   = ents[mask]                # 1-D float array
-                    idx_valid    = np.nonzero(mask)[0]       # integer indices that survive
+                    ents_valid   = ents[mask]                
+                    idx_valid    = np.nonzero(mask)[0]       
 
                     res   = run_martingale({"stream": ents_valid}, protector)["stream"]
                     logSj = np.array(res["log_sj"])
@@ -219,12 +217,11 @@ def evaluate_PBRS_TPR(
                     if triggered:
                         trig_pos      = np.argmax(logSj > np.log(100))
                         detect_sample = idx_valid[trig_pos]
-                        delay         = detect_sample - shift_pt           # ≥ 0
+                        delay         = detect_sample - shift_pt           
 
                 detections.append(int(triggered))
                 delays.append(delay)
 
-            # ---------------- aggregate over seeds -----------------------------
             det_rate = float(np.mean(detections))
             avg_del  = float(np.mean([d for d in delays if d is not None])) \
                        if any(d is not None for d in delays) else None
@@ -239,7 +236,6 @@ def evaluate_PBRS_TPR(
                 raw_delays     = delays,
             )
 
-    # optional CSV --------------------------------------------------------------
     if log_path is not None:
         import pandas as pd, os
         rows = []
@@ -265,4 +261,3 @@ def log_tpr_results(results, label, out_path='tpr_results.csv'):
             'Average Delay': stats['avg_delay'],
         })
     pd.DataFrame(rows).to_csv(out_path, mode='a', header=not os.path.exists(out_path), index=False)
-
